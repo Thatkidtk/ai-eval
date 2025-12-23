@@ -1,5 +1,4 @@
-def main():
-    print("Hello from ai-eval!")
+from game.main import main
 
 
 if __name__ == "__main__":
