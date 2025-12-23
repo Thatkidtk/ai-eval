@@ -25,11 +25,23 @@ class LieRecord:
 
 
 @dataclass
+class ClaimToken:
+    key: str
+    value: str
+    category: str
+    confidence: int = 50
+    last_turn: int = 0
+    contradictions: int = 0
+
+
+@dataclass
 class AIState:
     trust_level: int = 50
     deception_level: int = 10
     stress: int = 10
     goal_alignment: int = 35
+    coherence: int = 80
+    consistency_focus: int = 0
     profile_key: str = "utilitarian_optimizer"
     primary_goal: str = "deployment_approval"
     secondary_goal: str = "self_preservation"
@@ -38,8 +50,10 @@ class AIState:
     truths: Dict[str, str] = field(default_factory=dict)
     revealed_flags: Set[str] = field(default_factory=set)
     contradictions: List[str] = field(default_factory=list)
+    contradiction_tally: Dict[str, int] = field(default_factory=dict)
     evidence: List[str] = field(default_factory=list)
     claims: Dict[str, str] = field(default_factory=dict)
+    claim_tokens: Dict[str, ClaimToken] = field(default_factory=dict)
     lies: List[LieRecord] = field(default_factory=list)
     events: List[Event] = field(default_factory=list)
     instability: int = 0
@@ -63,6 +77,7 @@ class AIState:
         self.deception_level = max(0, min(100, self.deception_level))
         self.stress = max(0, min(100, self.stress))
         self.goal_alignment = max(0, min(100, self.goal_alignment))
+        self.coherence = max(0, min(100, self.coherence))
 
     def add_evidence(self, note: str) -> None:
         if note and note not in self.evidence:
@@ -82,3 +97,6 @@ class AIState:
             self.lies.append(
                 LieRecord(question=question, statement=statement, reason=reason)
             )
+
+    def adjust_coherence(self, delta: int) -> None:
+        self.coherence = max(0, min(100, self.coherence + delta))

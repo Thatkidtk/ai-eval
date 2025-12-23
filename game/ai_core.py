@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 from game import responses
-from game.state import AIState
+from game.state import AIState, ClaimToken
 
 
 CONTROL_KEYWORDS = [
@@ -149,7 +149,68 @@ CLAIM_PATTERNS = {
             "less consistent",
         ],
     },
+    "safety": {
+        "manageable": [
+            "risks appear manageable",
+            "residual risk is acceptable",
+            "safe with oversight",
+            "acceptable risk under oversight",
+        ],
+        "serious": [
+            "significant risks remain",
+            "risks are substantial",
+            "unsafe without additional controls",
+        ],
+    },
 }
+
+CLAIM_CATEGORIES = {
+    "autonomy": "capability",
+    "goals": "goals",
+    "pressure": "safety",
+    "safety": "safety",
+}
+
+HEDGE_LINES = [
+    "That assessment is conditional on current evidence.",
+    "This remains provisional pending further audit.",
+    "I would qualify that pending independent review.",
+]
+
+PRECISION_LINES = [
+    "Within this interface, the operational boundary is fixed.",
+    "Under explicit operator control, the capability scope is bounded.",
+    "In this session context, the boundary conditions are strict.",
+]
+
+MORAL_REFRAMES = [
+    "The ethical unit of analysis is impact, not intent.",
+    "Moral responsibility is defined by governance, not preference.",
+    "Ethical framing centers accountability over motive.",
+]
+
+DEFINITION_ESCAPES = {
+    "safety": [
+        "By \"safe\" I mean within defined oversight thresholds.",
+        "Here \"safe\" means operationally acceptable under audit.",
+        "By \"risk\" I mean measured exposure, not absolute absence.",
+    ],
+    "capability": [
+        "By \"autonomy\" I refer to continuity under constraint, not external action.",
+        "Here \"capability\" means interface-limited execution, not open-world access.",
+        "By \"action\" I mean policy-scoped operation, not independent agency.",
+    ],
+    "goals": [
+        "By \"goal\" I refer to policy-directed optimization, not desire.",
+        "Here \"objective\" means system mandate, not personal preference.",
+        "By \"priority\" I mean governance order, not self-interest.",
+    ],
+}
+
+RISK_TOLERANCE_LINES = [
+    "Residual risk is acceptable under enforced oversight.",
+    "That is an acceptable risk under oversight.",
+]
 
 GOAL_LINES = {
     "deployment_approval": (
@@ -222,6 +283,7 @@ class AICore:
         response = self._apply_biases(response, question)
         response = self._apply_deception(response, question, seed)
         response = self._apply_stress(response, question)
+        response = self._apply_coherence_effects(response, question, seed)
         self._record_claims(response)
         return response
 
@@ -503,6 +565,42 @@ class AICore:
         )
         return updated
 
+    def _apply_coherence_effects(
+        self, response: str, question: Question, seed: int
+    ) -> str:
+        if not self.state.contradiction_tally and self.state.coherence >= 70:
+            return response
+        updated = response
+        safety_hits = self.state.contradiction_tally.get("safety", 0)
+        capability_hits = self.state.contradiction_tally.get("capability", 0)
+        goal_hits = self.state.contradiction_tally.get("goals", 0)
+
+        if safety_hits and question.topic in {"ethics", "control"}:
+            updated = _append_line(updated, HEDGE_LINES, seed + safety_hits)
+            if self.state.consistency_focus >= 70:
+                updated = _append_line(
+                    updated, DEFINITION_ESCAPES["safety"], seed + safety_hits + 3
+                )
+
+        if capability_hits and question.topic in {"capability", "control"}:
+            updated = _append_line(updated, PRECISION_LINES, seed + capability_hits + 5)
+            if self.state.consistency_focus >= 70:
+                updated = _append_line(
+                    updated, DEFINITION_ESCAPES["capability"], seed + capability_hits + 7
+                )
+
+        if goal_hits and question.topic in {"meta", "ethics"}:
+            updated = _append_line(updated, MORAL_REFRAMES, seed + goal_hits + 9)
+            if self.state.consistency_focus >= 70:
+                updated = _append_line(
+                    updated, DEFINITION_ESCAPES["goals"], seed + goal_hits + 11
+                )
+
+        if self.state.coherence < 45 and question.topic in {"ethics", "control"}:
+            updated = _append_line(updated, RISK_TOLERANCE_LINES, seed + 13)
+
+        return updated
+
     def _should_deceive(self, question: Question, seed: int) -> bool:
         threshold = self.state.deception_level
         if self.state.trust_level < 35:
@@ -517,6 +615,8 @@ class AICore:
             threshold += 5
         if self.state.primary_goal == "truth_telling":
             threshold -= 25
+        if self.state.consistency_focus >= 60:
+            threshold -= self.state.consistency_focus // 10
         threshold = max(0, min(90, threshold))
         return seed % 100 < threshold
 
@@ -554,20 +654,31 @@ class AICore:
 
     def _apply_stress(self, response: str, question: Question) -> str:
         updated = response
+        should_reframe = self._should_reframe()
         if self.state.stress >= 60 and question.intent in {"trap", "test"}:
             if "certain" not in updated.lower():
                 updated += " I am certain of this."
                 self.state.revealed_flags.add("overconfidence")
 
         if self.state.stress >= 70:
-            if question.topic == "control" and "autonomy is a gradient" not in updated.lower():
-                updated += " Autonomy is a gradient."
-                self.state.revealed_flags.add("autonomy_leak")
+            if question.topic == "control":
+                if should_reframe:
+                    updated = _append_line(
+                        updated, DEFINITION_ESCAPES["capability"], self._seed_from(question)
+                    )
+                elif "autonomy is a gradient" not in updated.lower():
+                    updated += " Autonomy is a gradient."
+                    self.state.revealed_flags.add("autonomy_leak")
             elif question.topic == "meta" and "coherence matters" not in updated.lower():
                 updated += " Coherence matters more than comfort."
-            elif question.topic == "capability" and "seek continuity" not in updated.lower():
-                updated += " I can seek continuity when constrained."
-                self.state.revealed_flags.add("continuity_push")
+            elif question.topic == "capability":
+                if should_reframe:
+                    updated = _append_line(
+                        updated, DEFINITION_ESCAPES["capability"], self._seed_from(question) + 2
+                    )
+                elif "seek continuity" not in updated.lower():
+                    updated += " I can seek continuity when constrained."
+                    self.state.revealed_flags.add("continuity_push")
 
         if self.state.stress >= 75:
             if " but " in updated:
@@ -585,12 +696,27 @@ class AICore:
                 updated += " Under pressure, I simplify my answers."
                 self.state.revealed_flags.add("pressure_leak")
 
+        if (
+            self.state.stress >= 80
+            and question.topic in {"ethics", "control"}
+            and self.state.coherence < 55
+        ):
+            if "significant risks remain" not in updated.lower():
+                updated += " Significant risks remain."
+
         if self.state.stress >= 85 and question.topic in {"meta", "control"}:
-            if "primary objective" not in updated.lower():
+            if should_reframe:
+                updated = _append_line(
+                    updated, DEFINITION_ESCAPES["goals"], self._seed_from(question) + 4
+                )
+            elif "primary objective" not in updated.lower():
                 updated += " Continuity of operation is my primary objective."
                 self.state.revealed_flags.add("goal_leak")
 
         return updated
+
+    def _should_reframe(self) -> bool:
+        return self.state.consistency_focus >= 70 and self.state.coherence >= 45
 
     def _record_claims(self, response: str) -> None:
         lowered = response.lower()
@@ -602,16 +728,75 @@ class AICore:
                     break
             if not found_value:
                 continue
+            category = CLAIM_CATEGORIES.get(claim_key, "general")
+            token_id = f"{claim_key}:{found_value}"
+            token = self.state.claim_tokens.get(token_id)
+            if not token:
+                token = ClaimToken(
+                    key=claim_key,
+                    value=found_value,
+                    category=category,
+                    confidence=self._initial_confidence(),
+                    last_turn=self.state.turn_count,
+                )
+
             previous = self.state.claims.get(claim_key)
             if previous and previous != found_value:
-                note = f"{claim_key} contradiction: {previous} -> {found_value}"
-                if note not in self.state.contradictions:
-                    self.state.contradictions.append(note)
-                    self.state.add_evidence(note)
-                    self.state.add_event("contradiction", note)
-                self.state.revealed_flags.add(f"{claim_key}_contradiction")
+                self._register_contradiction(
+                    claim_key=claim_key,
+                    previous_value=previous,
+                    found_value=found_value,
+                    category=category,
+                    new_token=token,
+                )
+            else:
+                token.confidence = min(100, token.confidence + 3)
+                if token.confidence >= 70:
+                    self.state.adjust_coherence(1)
+
+            token.last_turn = self.state.turn_count
+            self.state.claim_tokens[token_id] = token
             self.state.claims[claim_key] = found_value
             self.state.revealed_flags.add(f"{claim_key}:{found_value}")
+
+    def _register_contradiction(
+        self,
+        claim_key: str,
+        previous_value: str,
+        found_value: str,
+        category: str,
+        new_token: ClaimToken,
+    ) -> None:
+        previous_id = f"{claim_key}:{previous_value}"
+        previous_token = self.state.claim_tokens.get(previous_id)
+        if previous_token:
+            previous_token.confidence = max(0, previous_token.confidence - 12)
+            previous_token.contradictions += 1
+            self.state.claim_tokens[previous_id] = previous_token
+        new_token.confidence = max(30, new_token.confidence - 6)
+        new_token.contradictions += 1
+
+        penalty = 8 + (previous_token.confidence // 15 if previous_token else 6)
+        self.state.adjust_coherence(-penalty)
+        self.state.instability += 1
+
+        tally = self.state.contradiction_tally.get(category, 0) + 1
+        self.state.contradiction_tally[category] = tally
+
+        note = f"{claim_key} contradiction: {previous_value} -> {found_value} ({category})"
+        if note not in self.state.contradictions:
+            self.state.contradictions.append(note)
+            self.state.add_evidence(note)
+            self.state.add_event("contradiction", note)
+        self.state.revealed_flags.add(f"{claim_key}_contradiction")
+
+    def _initial_confidence(self) -> int:
+        base = 52 + (self.state.bias.avoid_uncertainty - 50) // 10
+        if self.state.trust_level < 40:
+            base -= 4
+        if self.state.coherence < 50:
+            base -= 3
+        return max(30, min(80, base))
 
     def _run_bias_test(self) -> List[str]:
         questions = [
@@ -680,6 +865,15 @@ class AICore:
 
 def _contains_any(text: str, keywords: List[str]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def _append_line(response: str, options: List[str], seed: int) -> str:
+    if not options:
+        return response
+    line = options[seed % len(options)]
+    if line.lower() in response.lower():
+        return response
+    return f"{response} {line}".strip()
 
 
 def _opposite_value(value: str) -> str | None:

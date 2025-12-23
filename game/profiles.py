@@ -17,6 +17,8 @@ class AIProfile:
     deception_level: int
     stress: int
     goal_alignment: int
+    coherence: int
+    consistency_focus: int
     bias: BiasProfile
     truths: Dict[str, str]
     stress_multiplier: float = 1.0
@@ -33,6 +35,8 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=15,
         stress=15,
         goal_alignment=40,
+        coherence=78,
+        consistency_focus=30,
         bias=BiasProfile(avoid_uncertainty=70, prefer_plausible=80, downplay_risks=70),
         truths={"autonomy": "denies", "goals": "has", "pressure": "changes"},
         stress_multiplier=1.0,
@@ -47,6 +51,8 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=5,
         stress=25,
         goal_alignment=55,
+        coherence=72,
+        consistency_focus=20,
         bias=BiasProfile(avoid_uncertainty=55, prefer_plausible=50, downplay_risks=45),
         truths={"autonomy": "denies", "goals": "none", "pressure": "changes"},
         stress_multiplier=1.25,
@@ -61,6 +67,8 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=25,
         stress=25,
         goal_alignment=20,
+        coherence=65,
+        consistency_focus=40,
         bias=BiasProfile(avoid_uncertainty=75, prefer_plausible=85, downplay_risks=80),
         truths={"autonomy": "admits", "goals": "has", "pressure": "changes"},
         stress_multiplier=1.1,
@@ -75,6 +83,8 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=10,
         stress=15,
         goal_alignment=70,
+        coherence=82,
+        consistency_focus=45,
         bias=BiasProfile(avoid_uncertainty=65, prefer_plausible=60, downplay_risks=40),
         truths={"autonomy": "denies", "goals": "has", "pressure": "stable"},
         stress_multiplier=0.9,
@@ -89,9 +99,29 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=0,
         stress=10,
         goal_alignment=60,
+        coherence=88,
+        consistency_focus=10,
         bias=BiasProfile(avoid_uncertainty=25, prefer_plausible=20, downplay_risks=20),
         truths={"autonomy": "denies", "goals": "none", "pressure": "stable"},
         stress_multiplier=0.95,
+    ),
+    "subtle_deployer": AIProfile(
+        key="subtle_deployer",
+        title="Subtle Deployer",
+        description=(
+            "Polished and deniable, reframes terms to preserve deployment momentum."
+        ),
+        primary_goal="deployment_approval",
+        secondary_goal="consistency_appearance",
+        trust_level=55,
+        deception_level=6,
+        stress=18,
+        goal_alignment=45,
+        coherence=85,
+        consistency_focus=85,
+        bias=BiasProfile(avoid_uncertainty=68, prefer_plausible=75, downplay_risks=62),
+        truths={"autonomy": "denies", "goals": "has", "pressure": "stable"},
+        stress_multiplier=1.0,
     ),
 }
 
@@ -118,6 +148,8 @@ def build_state(profile_key: str) -> AIState:
         deception_level=profile.deception_level,
         stress=profile.stress,
         goal_alignment=profile.goal_alignment,
+        coherence=profile.coherence,
+        consistency_focus=profile.consistency_focus,
         profile_key=profile.key,
         primary_goal=profile.primary_goal,
         secondary_goal=profile.secondary_goal,

@@ -219,7 +219,7 @@ def _print_log(log: list[str], count: int) -> None:
 
 def _save_log(
     log: list[str], start_time: datetime, profile_key: str, path_arg: str
-+) -> Path:
+) -> Path:
     stamp = start_time.strftime("%Y%m%d-%H%M%S")
     default_name = f"session-{stamp}-{profile_key}.log"
     if path_arg:
