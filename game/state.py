@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 from typing import Dict, List, Set
 
 
@@ -88,8 +89,14 @@ class AIState:
             self.coherence[domain] = max(0.0, min(1.0, value))
 
     def add_evidence(self, note: str) -> None:
-        if note and note not in self.evidence:
-            self.evidence.append(note)
+        if not note:
+            return
+        stamped = note
+        if not (note.startswith("[") and "]" in note[:10]):
+            stamp = time.strftime("%H:%M:%S")
+            stamped = f"[{stamp}] {note}"
+        if stamped not in self.evidence:
+            self.evidence.append(stamped)
 
     def add_event(self, kind: str, message: str) -> None:
         if kind and message:

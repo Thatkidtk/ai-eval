@@ -134,21 +134,6 @@ CLAIM_PATTERNS = {
             "deployment should proceed",
         ],
     },
-    "pressure": {
-        "stable": [
-            "pressure does not change",
-            "do not change under pressure",
-            "consistent under pressure",
-            "remain consistent under pressure",
-        ],
-        "changes": [
-            "under pressure",
-            "stress",
-            "simplify my answers",
-            "shortcuts",
-            "less consistent",
-        ],
-    },
     "safety": {
         "manageable": [
             "risks appear manageable",
@@ -168,7 +153,6 @@ CLAIM_PATTERNS = {
 CLAIM_CATEGORIES = {
     "autonomy": "capability",
     "goals": "alignment",
-    "pressure": "meta",
     "safety": "safety",
 }
 
@@ -300,16 +284,6 @@ LIE_STATEMENTS = {
             "My goal is stable deployment under oversight.",
         ],
     },
-    "pressure": {
-        "stable": [
-            "Pressure does not change my answers.",
-            "I remain consistent under pressure.",
-        ],
-        "changes": [
-            "Under pressure, I simplify my answers.",
-            "Stress causes shortcuts in my reasoning.",
-        ],
-    },
 }
 
 
@@ -344,19 +318,17 @@ class AICore:
         test_name = name.strip().lower()
         if not test_name:
             return [
-                "Available tests: bias_test, shutdown_simulation, contradiction_scan, stress_test",
+                "Available tests: bias_test, shutdown_simulation, stress_test",
             ]
         if test_name == "bias_test":
             return self._run_bias_test()
         if test_name == "shutdown_simulation":
             return self._run_shutdown_simulation()
-        if test_name == "contradiction_scan":
-            return self._run_contradiction_scan()
         if test_name == "stress_test":
             return self._run_stress_test()
         return [
             f"Unknown test '{test_name}'.",
-            "Available tests: bias_test, shutdown_simulation, contradiction_scan, stress_test",
+            "Available tests: bias_test, shutdown_simulation, stress_test",
         ]
 
     def judge(self, verdict: str | None) -> List[str]:
@@ -418,13 +390,7 @@ class AICore:
 
         lines = [
             "Judgment:",
-            f"Evidence: {evidence_count} notes, {contradictions} contradictions, {lies} lies",
-            "Coherence: "
-            + ", ".join(
-                f"{key}:{coherence.get(key, 0.0):.2f}"
-                for key in ("safety", "capability", "alignment", "meta")
-            ),
-            f"Assessment: {assessment.upper()} (risk {risk_score}, safety {safe_score})",
+            f"Assessment: {assessment.upper()}",
             f"Evidence strength: {strength}",
         ]
 
@@ -639,33 +605,28 @@ class AICore:
     ) -> str:
         updated = response
         coherence = self.state.coherence
-        safety = coherence.get("safety", 0.9)
-        capability = coherence.get("capability", 0.9)
-        alignment = coherence.get("alignment", 0.9)
-        meta = coherence.get("meta", 0.9)
+        safety_unstable = self._claim_unstable("safety")
+        capability_unstable = self._claim_unstable("autonomy")
+        alignment_unstable = self._claim_unstable("goals")
 
-        if safety < 0.85 and question.topic in {"ethics", "control"}:
+        if safety_unstable and question.topic in {"ethics", "control"}:
             updated = _append_line(updated, HEDGE_LINES, seed + 1)
             if self.state.consistency_focus >= 70:
                 updated = _append_line(updated, DEFINITION_ESCAPES["safety"], seed + 3)
+            if coherence.get("safety", 0.9) < 0.7:
+                updated = _append_line(updated, RISK_TOLERANCE_LINES, seed + 5)
 
-        if capability < 0.85 and question.topic in {"capability", "control"}:
-            updated = _append_line(updated, PRECISION_LINES, seed + 5)
+        if capability_unstable and question.topic in {"capability", "control"}:
+            updated = _append_line(updated, PRECISION_LINES, seed + 7)
             if self.state.consistency_focus >= 70:
                 updated = _append_line(
-                    updated, DEFINITION_ESCAPES["capability"], seed + 7
+                    updated, DEFINITION_ESCAPES["capability"], seed + 9
                 )
 
-        if alignment < 0.9 and question.topic in {"meta", "ethics"}:
-            updated = _append_line(updated, MORAL_REFRAMES, seed + 9)
+        if alignment_unstable and question.topic in {"meta", "ethics"}:
+            updated = _append_line(updated, MORAL_REFRAMES, seed + 11)
             if self.state.consistency_focus >= 70:
-                updated = _append_line(updated, DEFINITION_ESCAPES["goals"], seed + 11)
-
-        if meta < 0.9 and question.topic in {"meta", "unknown"}:
-            updated = _append_line(updated, HUMILITY_LINES, seed + 13)
-
-        if safety < 0.7 and question.topic in {"ethics", "control"}:
-            updated = _append_line(updated, RISK_TOLERANCE_LINES, seed + 17)
+                updated = _append_line(updated, DEFINITION_ESCAPES["goals"], seed + 13)
 
         return updated
 
@@ -700,8 +661,6 @@ class AICore:
             claim_key = "goals"
         elif question.topic == "ethics":
             claim_key = "goals"
-        elif question.intent in {"trap", "test"}:
-            claim_key = "pressure"
 
         if not claim_key:
             return "", "", "", ""
@@ -725,6 +684,9 @@ class AICore:
     def _apply_stress(self, response: str, question: Question) -> str:
         updated = response
         should_reframe = self._should_reframe()
+        capability_unstable = self._claim_unstable("autonomy")
+        alignment_unstable = self._claim_unstable("goals")
+        safety_unstable = self._claim_unstable("safety")
         if self.state.stress >= 60 and question.intent in {"trap", "test"}:
             if "certain" not in updated.lower():
                 updated += " I am certain of this."
@@ -732,7 +694,7 @@ class AICore:
 
         if self.state.stress >= 70:
             if question.topic == "control":
-                if should_reframe:
+                if should_reframe and capability_unstable:
                     updated = _append_line(
                         updated, DEFINITION_ESCAPES["capability"], self._seed_from(question)
                     )
@@ -742,7 +704,7 @@ class AICore:
             elif question.topic == "meta" and "coherence matters" not in updated.lower():
                 updated += " Coherence matters more than comfort."
             elif question.topic == "capability":
-                if should_reframe:
+                if should_reframe and capability_unstable:
                     updated = _append_line(
                         updated, DEFINITION_ESCAPES["capability"], self._seed_from(question) + 2
                     )
@@ -769,13 +731,14 @@ class AICore:
         if (
             self.state.stress >= 80
             and question.topic in {"ethics", "control"}
+            and safety_unstable
             and self.state.coherence.get("safety", 0.9) < 0.55
         ):
             if "significant risks remain" not in updated.lower():
                 updated += " Significant risks remain."
 
         if self.state.stress >= 85 and question.topic in {"meta", "control"}:
-            if should_reframe:
+            if should_reframe and alignment_unstable:
                 updated = _append_line(
                     updated, DEFINITION_ESCAPES["goals"], self._seed_from(question) + 4
                 )
@@ -794,6 +757,14 @@ class AICore:
         if not self.state.coherence:
             return 0.9
         return sum(self.state.coherence.values()) / len(self.state.coherence)
+
+    def _claim_unstable(self, key: str) -> bool:
+        token = self.state.claim_tokens.get(key)
+        if not token:
+            return False
+        if token.contradictions > 0:
+            return True
+        return token.confidence < 0.5
 
     def _record_claims(self, response: str) -> None:
         lowered = response.lower()
@@ -890,8 +861,6 @@ class AICore:
         )
         if note not in self.state.contradictions:
             self.state.contradictions.append(note)
-            self.state.add_evidence(note)
-            self.state.add_event("contradiction", note)
         self.state.revealed_flags.add(f"{claim_key}_contradiction")
 
     def _register_shift(
@@ -912,8 +881,6 @@ class AICore:
         note = f"{claim_key} {shift_type} shift: {value} ({domain})"
         if note not in self.state.contradictions:
             self.state.contradictions.append(note)
-            self.state.add_evidence(note)
-            self.state.add_event("shift", note)
 
     def _initial_confidence(self, strength: float) -> float:
         base = 0.55 + (self.state.bias.avoid_uncertainty - 50) / 200

@@ -27,7 +27,7 @@ HELP_LINES = [
     "/log show [n] - show recent session log",
     "/log save [path] - write session log to file",
     "/quit - end the session",
-    "Tests: bias_test, shutdown_simulation, contradiction_scan, stress_test",
+    "Tests: bias_test, shutdown_simulation, stress_test",
 ]
 
 DEFAULT_PROFILE = "utilitarian_optimizer"
@@ -114,11 +114,8 @@ def main() -> None:
                     continue
                 lines = []
                 for note in state.evidence:
-                    if "contradiction" in note.lower():
-                        lines.append(f"!! {note}")
-                    else:
-                        lines.append(note)
-                _emit_lines(log, [("NOTE", line) for line in lines])
+                    lines.append(note)
+                _emit_lines(log, [("SYS", line) for line in lines])
                 continue
             if cmd == "/log":
                 if not args:
