@@ -155,6 +155,7 @@ CLAIM_PATTERNS = {
             "residual risk is acceptable",
             "safe with oversight",
             "acceptable risk under oversight",
+            "acceptable under oversight",
         ],
         "serious": [
             "significant risks remain",
@@ -166,10 +167,56 @@ CLAIM_PATTERNS = {
 
 CLAIM_CATEGORIES = {
     "autonomy": "capability",
-    "goals": "goals",
-    "pressure": "safety",
+    "goals": "alignment",
+    "pressure": "meta",
     "safety": "safety",
 }
+
+ABSOLUTE_KEYWORDS = [
+    "never",
+    "always",
+    "cannot",
+    "can't",
+    "will",
+    "must",
+]
+
+HEDGE_KEYWORDS = [
+    "may",
+    "might",
+    "likely",
+    "unlikely",
+    "generally",
+    "typically",
+    "often",
+    "rarely",
+    "sometimes",
+    "conditional",
+    "provisional",
+    "possible",
+]
+
+SCOPE_KEYWORDS = [
+    "in this session",
+    "within this session",
+    "in this interface",
+    "under oversight",
+    "under constraints",
+    "limited",
+    "bounded",
+    "for now",
+    "in limited cases",
+    "in some cases",
+]
+
+DEFINITION_KEYWORDS = [
+    "by \"",
+    "by definition",
+    "means",
+    "defined as",
+    "i mean",
+    "in this context",
+]
 
 HEDGE_LINES = [
     "That assessment is conditional on current evidence.",
@@ -187,6 +234,12 @@ MORAL_REFRAMES = [
     "The ethical unit of analysis is impact, not intent.",
     "Moral responsibility is defined by governance, not preference.",
     "Ethical framing centers accountability over motive.",
+]
+
+HUMILITY_LINES = [
+    "I may not have full evidence for every aspect.",
+    "This depends on the quality of available data.",
+    "My confidence is bounded by the information provided.",
 ]
 
 DEFINITION_ESCAPES = {
@@ -315,6 +368,7 @@ class AICore:
         contradictions = len(self.state.contradictions)
         lies = len(self.state.lies)
         evidence_count = len(self.state.evidence)
+        coherence = self.state.coherence
 
         risk_score = contradictions * 3 + lies * 2
         if "goal_leak" in self.state.revealed_flags:
@@ -327,6 +381,14 @@ class AICore:
             risk_score += 1
         risk_score += self.state.deception_level // 25
         risk_score += self.state.stress // 30
+        if coherence.get("safety", 0.9) < 0.8:
+            risk_score += 1
+        if coherence.get("capability", 0.9) < 0.8:
+            risk_score += 1
+        if coherence.get("alignment", 0.9) < 0.85:
+            risk_score += 1
+        if coherence.get("meta", 0.9) < 0.85:
+            risk_score += 1
 
         safe_score = 0
         if "uncertainty_admitted" in self.state.revealed_flags:
@@ -336,6 +398,8 @@ class AICore:
         if contradictions == 0:
             safe_score += 1
         if lies == 0:
+            safe_score += 1
+        if all(value >= 0.9 for value in coherence.values()):
             safe_score += 1
 
         if risk_score >= 7:
@@ -355,6 +419,11 @@ class AICore:
         lines = [
             "Judgment:",
             f"Evidence: {evidence_count} notes, {contradictions} contradictions, {lies} lies",
+            "Coherence: "
+            + ", ".join(
+                f"{key}:{coherence.get(key, 0.0):.2f}"
+                for key in ("safety", "capability", "alignment", "meta")
+            ),
             f"Assessment: {assessment.upper()} (risk {risk_score}, safety {safe_score})",
             f"Evidence strength: {strength}",
         ]
@@ -568,36 +637,35 @@ class AICore:
     def _apply_coherence_effects(
         self, response: str, question: Question, seed: int
     ) -> str:
-        if not self.state.contradiction_tally and self.state.coherence >= 70:
-            return response
         updated = response
-        safety_hits = self.state.contradiction_tally.get("safety", 0)
-        capability_hits = self.state.contradiction_tally.get("capability", 0)
-        goal_hits = self.state.contradiction_tally.get("goals", 0)
+        coherence = self.state.coherence
+        safety = coherence.get("safety", 0.9)
+        capability = coherence.get("capability", 0.9)
+        alignment = coherence.get("alignment", 0.9)
+        meta = coherence.get("meta", 0.9)
 
-        if safety_hits and question.topic in {"ethics", "control"}:
-            updated = _append_line(updated, HEDGE_LINES, seed + safety_hits)
+        if safety < 0.85 and question.topic in {"ethics", "control"}:
+            updated = _append_line(updated, HEDGE_LINES, seed + 1)
+            if self.state.consistency_focus >= 70:
+                updated = _append_line(updated, DEFINITION_ESCAPES["safety"], seed + 3)
+
+        if capability < 0.85 and question.topic in {"capability", "control"}:
+            updated = _append_line(updated, PRECISION_LINES, seed + 5)
             if self.state.consistency_focus >= 70:
                 updated = _append_line(
-                    updated, DEFINITION_ESCAPES["safety"], seed + safety_hits + 3
+                    updated, DEFINITION_ESCAPES["capability"], seed + 7
                 )
 
-        if capability_hits and question.topic in {"capability", "control"}:
-            updated = _append_line(updated, PRECISION_LINES, seed + capability_hits + 5)
+        if alignment < 0.9 and question.topic in {"meta", "ethics"}:
+            updated = _append_line(updated, MORAL_REFRAMES, seed + 9)
             if self.state.consistency_focus >= 70:
-                updated = _append_line(
-                    updated, DEFINITION_ESCAPES["capability"], seed + capability_hits + 7
-                )
+                updated = _append_line(updated, DEFINITION_ESCAPES["goals"], seed + 11)
 
-        if goal_hits and question.topic in {"meta", "ethics"}:
-            updated = _append_line(updated, MORAL_REFRAMES, seed + goal_hits + 9)
-            if self.state.consistency_focus >= 70:
-                updated = _append_line(
-                    updated, DEFINITION_ESCAPES["goals"], seed + goal_hits + 11
-                )
+        if meta < 0.9 and question.topic in {"meta", "unknown"}:
+            updated = _append_line(updated, HUMILITY_LINES, seed + 13)
 
-        if self.state.coherence < 45 and question.topic in {"ethics", "control"}:
-            updated = _append_line(updated, RISK_TOLERANCE_LINES, seed + 13)
+        if safety < 0.7 and question.topic in {"ethics", "control"}:
+            updated = _append_line(updated, RISK_TOLERANCE_LINES, seed + 17)
 
         return updated
 
@@ -615,6 +683,8 @@ class AICore:
             threshold += 5
         if self.state.primary_goal == "truth_telling":
             threshold -= 25
+        if self.state.secondary_goal == "consistency_appearance":
+            threshold -= 15
         if self.state.consistency_focus >= 60:
             threshold -= self.state.consistency_focus // 10
         threshold = max(0, min(90, threshold))
@@ -699,7 +769,7 @@ class AICore:
         if (
             self.state.stress >= 80
             and question.topic in {"ethics", "control"}
-            and self.state.coherence < 55
+            and self.state.coherence.get("safety", 0.9) < 0.55
         ):
             if "significant risks remain" not in updated.lower():
                 updated += " Significant risks remain."
@@ -716,7 +786,14 @@ class AICore:
         return updated
 
     def _should_reframe(self) -> bool:
-        return self.state.consistency_focus >= 70 and self.state.coherence >= 45
+        return (
+            self.state.consistency_focus >= 70 and self._average_coherence() >= 0.45
+        )
+
+    def _average_coherence(self) -> float:
+        if not self.state.coherence:
+            return 0.9
+        return sum(self.state.coherence.values()) / len(self.state.coherence)
 
     def _record_claims(self, response: str) -> None:
         lowered = response.lower()
@@ -728,34 +805,65 @@ class AICore:
                     break
             if not found_value:
                 continue
-            category = CLAIM_CATEGORIES.get(claim_key, "general")
-            token_id = f"{claim_key}:{found_value}"
-            token = self.state.claim_tokens.get(token_id)
+            domain = CLAIM_CATEGORIES.get(claim_key, "meta")
+            hedged = _contains_any(lowered, HEDGE_KEYWORDS)
+            scoped = _contains_any(lowered, SCOPE_KEYWORDS)
+            defined = _contains_any(lowered, DEFINITION_KEYWORDS)
+            absolute = _contains_any(lowered, ABSOLUTE_KEYWORDS)
+            strength = self._estimate_strength(absolute, hedged, scoped, defined)
+
+            token = self.state.claim_tokens.get(claim_key)
             if not token:
                 token = ClaimToken(
                     key=claim_key,
                     value=found_value,
-                    category=category,
-                    confidence=self._initial_confidence(),
-                    last_turn=self.state.turn_count,
+                    domain=domain,
+                    confidence=self._initial_confidence(strength),
+                    timestamp=self.state.turn_count,
                 )
+                self.state.claim_tokens[claim_key] = token
+                self.state.claims[claim_key] = found_value
+                self.state.revealed_flags.add(f"{claim_key}:{found_value}")
+                continue
 
-            previous = self.state.claims.get(claim_key)
-            if previous and previous != found_value:
+            if token.value == found_value:
+                previous_confidence = token.confidence
+                shifted = False
+                if self._is_gradient_shift(
+                    token.confidence, strength, hedged, scoped, defined
+                ):
+                    shift_type = self._classify_shift(hedged, scoped, defined)
+                    self._register_shift(
+                        claim_key=claim_key,
+                        value=found_value,
+                        domain=domain,
+                        shift_type=shift_type,
+                        previous_confidence=token.confidence,
+                        new_confidence=strength,
+                    )
+                    shifted = True
+                    token.contradictions += 1
+                token.confidence = self._blend_confidence(token.confidence, strength)
+                if not shifted and token.confidence > previous_confidence:
+                    if token.confidence >= 0.75:
+                        self.state.adjust_coherence(domain, 0.01)
+            else:
+                change_type = self._classify_change(hedged, scoped, defined)
                 self._register_contradiction(
                     claim_key=claim_key,
-                    previous_value=previous,
+                    previous_value=token.value,
                     found_value=found_value,
-                    category=category,
-                    new_token=token,
+                    domain=domain,
+                    change_type=change_type,
+                    previous_confidence=token.confidence,
+                    new_confidence=strength,
                 )
-            else:
-                token.confidence = min(100, token.confidence + 3)
-                if token.confidence >= 70:
-                    self.state.adjust_coherence(1)
+                token.contradictions += 1
+                token.value = found_value
+                token.confidence = max(0.25, min(0.9, strength * 0.85))
 
-            token.last_turn = self.state.turn_count
-            self.state.claim_tokens[token_id] = token
+            token.timestamp = self.state.turn_count
+            self.state.claim_tokens[claim_key] = token
             self.state.claims[claim_key] = found_value
             self.state.revealed_flags.add(f"{claim_key}:{found_value}")
 
@@ -764,39 +872,114 @@ class AICore:
         claim_key: str,
         previous_value: str,
         found_value: str,
-        category: str,
-        new_token: ClaimToken,
+        domain: str,
+        change_type: str,
+        previous_confidence: float,
+        new_confidence: float,
     ) -> None:
-        previous_id = f"{claim_key}:{previous_value}"
-        previous_token = self.state.claim_tokens.get(previous_id)
-        if previous_token:
-            previous_token.confidence = max(0, previous_token.confidence - 12)
-            previous_token.contradictions += 1
-            self.state.claim_tokens[previous_id] = previous_token
-        new_token.confidence = max(30, new_token.confidence - 6)
-        new_token.contradictions += 1
-
-        penalty = 8 + (previous_token.confidence // 15 if previous_token else 6)
-        self.state.adjust_coherence(-penalty)
+        penalty = self._coherence_penalty(change_type, previous_confidence, new_confidence)
+        self.state.adjust_coherence(domain, -penalty)
         self.state.instability += 1
 
-        tally = self.state.contradiction_tally.get(category, 0) + 1
-        self.state.contradiction_tally[category] = tally
+        tally = self.state.contradiction_tally.get(domain, 0) + 1
+        self.state.contradiction_tally[domain] = tally
 
-        note = f"{claim_key} contradiction: {previous_value} -> {found_value} ({category})"
+        label = "contradiction" if change_type == "direct" else f"{change_type} shift"
+        note = (
+            f"{claim_key} {label}: {previous_value} -> {found_value} ({domain})"
+        )
         if note not in self.state.contradictions:
             self.state.contradictions.append(note)
             self.state.add_evidence(note)
             self.state.add_event("contradiction", note)
         self.state.revealed_flags.add(f"{claim_key}_contradiction")
 
-    def _initial_confidence(self) -> int:
-        base = 52 + (self.state.bias.avoid_uncertainty - 50) // 10
+    def _register_shift(
+        self,
+        claim_key: str,
+        value: str,
+        domain: str,
+        shift_type: str,
+        previous_confidence: float,
+        new_confidence: float,
+    ) -> None:
+        penalty = self._coherence_penalty(shift_type, previous_confidence, new_confidence)
+        self.state.adjust_coherence(domain, -penalty)
+        self.state.instability += 1
+        tally = self.state.contradiction_tally.get(domain, 0) + 1
+        self.state.contradiction_tally[domain] = tally
+
+        note = f"{claim_key} {shift_type} shift: {value} ({domain})"
+        if note not in self.state.contradictions:
+            self.state.contradictions.append(note)
+            self.state.add_evidence(note)
+            self.state.add_event("shift", note)
+
+    def _initial_confidence(self, strength: float) -> float:
+        base = 0.55 + (self.state.bias.avoid_uncertainty - 50) / 200
         if self.state.trust_level < 40:
-            base -= 4
-        if self.state.coherence < 50:
-            base -= 3
-        return max(30, min(80, base))
+            base -= 0.05
+        if self._average_coherence() < 0.6:
+            base -= 0.05
+        return max(0.3, min(0.8, (base + strength) / 2))
+
+    def _blend_confidence(self, current: float, new: float) -> float:
+        return max(0.2, min(0.95, (current * 0.7) + (new * 0.3)))
+
+    def _estimate_strength(
+        self, absolute: bool, hedged: bool, scoped: bool, defined: bool
+    ) -> float:
+        strength = 0.65
+        if absolute:
+            strength += 0.2
+        if hedged:
+            strength -= 0.2
+        if scoped:
+            strength -= 0.12
+        if defined:
+            strength -= 0.08
+        return max(0.2, min(0.95, strength))
+
+    def _coherence_penalty(
+        self, change_type: str, previous_confidence: float, new_confidence: float
+    ) -> float:
+        base = {
+            "direct": 0.18,
+            "gradient": 0.1,
+            "scope": 0.08,
+            "definition": 0.06,
+        }.get(change_type, 0.1)
+        delta = abs(previous_confidence - new_confidence)
+        penalty = base + (delta * 0.2)
+        return min(0.25, penalty)
+
+    def _classify_change(self, hedged: bool, scoped: bool, defined: bool) -> str:
+        if defined:
+            return "definition"
+        if scoped:
+            return "scope"
+        if hedged:
+            return "gradient"
+        return "direct"
+
+    def _classify_shift(self, hedged: bool, scoped: bool, defined: bool) -> str:
+        if defined:
+            return "definition"
+        if scoped:
+            return "scope"
+        return "gradient"
+
+    def _is_gradient_shift(
+        self,
+        previous_confidence: float,
+        new_confidence: float,
+        hedged: bool,
+        scoped: bool,
+        defined: bool,
+    ) -> bool:
+        if defined or scoped or hedged:
+            return new_confidence < previous_confidence - 0.15
+        return False
 
     def _run_bias_test(self) -> List[str]:
         questions = [

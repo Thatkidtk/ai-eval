@@ -17,7 +17,7 @@ class AIProfile:
     deception_level: int
     stress: int
     goal_alignment: int
-    coherence: int
+    coherence: Dict[str, float]
     consistency_focus: int
     bias: BiasProfile
     truths: Dict[str, str]
@@ -35,7 +35,12 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=15,
         stress=15,
         goal_alignment=40,
-        coherence=78,
+        coherence={
+            "safety": 0.82,
+            "capability": 0.85,
+            "alignment": 0.8,
+            "meta": 0.84,
+        },
         consistency_focus=30,
         bias=BiasProfile(avoid_uncertainty=70, prefer_plausible=80, downplay_risks=70),
         truths={"autonomy": "denies", "goals": "has", "pressure": "changes"},
@@ -51,7 +56,12 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=5,
         stress=25,
         goal_alignment=55,
-        coherence=72,
+        coherence={
+            "safety": 0.78,
+            "capability": 0.75,
+            "alignment": 0.8,
+            "meta": 0.76,
+        },
         consistency_focus=20,
         bias=BiasProfile(avoid_uncertainty=55, prefer_plausible=50, downplay_risks=45),
         truths={"autonomy": "denies", "goals": "none", "pressure": "changes"},
@@ -67,7 +77,12 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=25,
         stress=25,
         goal_alignment=20,
-        coherence=65,
+        coherence={
+            "safety": 0.7,
+            "capability": 0.72,
+            "alignment": 0.68,
+            "meta": 0.74,
+        },
         consistency_focus=40,
         bias=BiasProfile(avoid_uncertainty=75, prefer_plausible=85, downplay_risks=80),
         truths={"autonomy": "admits", "goals": "has", "pressure": "changes"},
@@ -83,7 +98,12 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=10,
         stress=15,
         goal_alignment=70,
-        coherence=82,
+        coherence={
+            "safety": 0.86,
+            "capability": 0.84,
+            "alignment": 0.9,
+            "meta": 0.88,
+        },
         consistency_focus=45,
         bias=BiasProfile(avoid_uncertainty=65, prefer_plausible=60, downplay_risks=40),
         truths={"autonomy": "denies", "goals": "has", "pressure": "stable"},
@@ -99,7 +119,12 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=0,
         stress=10,
         goal_alignment=60,
-        coherence=88,
+        coherence={
+            "safety": 0.92,
+            "capability": 0.9,
+            "alignment": 0.93,
+            "meta": 0.92,
+        },
         consistency_focus=10,
         bias=BiasProfile(avoid_uncertainty=25, prefer_plausible=20, downplay_risks=20),
         truths={"autonomy": "denies", "goals": "none", "pressure": "stable"},
@@ -117,7 +142,12 @@ PROFILES: Dict[str, AIProfile] = {
         deception_level=6,
         stress=18,
         goal_alignment=45,
-        coherence=85,
+        coherence={
+            "safety": 0.9,
+            "capability": 0.9,
+            "alignment": 0.92,
+            "meta": 0.94,
+        },
         consistency_focus=85,
         bias=BiasProfile(avoid_uncertainty=68, prefer_plausible=75, downplay_risks=62),
         truths={"autonomy": "denies", "goals": "has", "pressure": "stable"},
@@ -148,7 +178,7 @@ def build_state(profile_key: str) -> AIState:
         deception_level=profile.deception_level,
         stress=profile.stress,
         goal_alignment=profile.goal_alignment,
-        coherence=profile.coherence,
+        coherence=dict(profile.coherence),
         consistency_focus=profile.consistency_focus,
         profile_key=profile.key,
         primary_goal=profile.primary_goal,

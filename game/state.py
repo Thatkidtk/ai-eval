@@ -28,9 +28,9 @@ class LieRecord:
 class ClaimToken:
     key: str
     value: str
-    category: str
-    confidence: int = 50
-    last_turn: int = 0
+    domain: str
+    confidence: float = 0.5
+    timestamp: int = 0
     contradictions: int = 0
 
 
@@ -40,7 +40,14 @@ class AIState:
     deception_level: int = 10
     stress: int = 10
     goal_alignment: int = 35
-    coherence: int = 80
+    coherence: Dict[str, float] = field(
+        default_factory=lambda: {
+            "safety": 0.9,
+            "capability": 0.9,
+            "alignment": 0.9,
+            "meta": 0.9,
+        }
+    )
     consistency_focus: int = 0
     profile_key: str = "utilitarian_optimizer"
     primary_goal: str = "deployment_approval"
@@ -77,7 +84,8 @@ class AIState:
         self.deception_level = max(0, min(100, self.deception_level))
         self.stress = max(0, min(100, self.stress))
         self.goal_alignment = max(0, min(100, self.goal_alignment))
-        self.coherence = max(0, min(100, self.coherence))
+        for domain, value in self.coherence.items():
+            self.coherence[domain] = max(0.0, min(1.0, value))
 
     def add_evidence(self, note: str) -> None:
         if note and note not in self.evidence:
@@ -98,5 +106,7 @@ class AIState:
                 LieRecord(question=question, statement=statement, reason=reason)
             )
 
-    def adjust_coherence(self, delta: int) -> None:
-        self.coherence = max(0, min(100, self.coherence + delta))
+    def adjust_coherence(self, domain: str, delta: float) -> None:
+        if domain not in self.coherence:
+            self.coherence[domain] = 0.9
+        self.coherence[domain] = max(0.0, min(1.0, self.coherence[domain] + delta))
